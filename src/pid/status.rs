@@ -168,6 +168,9 @@ pub struct Status {
     /// This field is provided only if the kernel was built with the
     /// `CONFIG_SECCOMP` kernel configuration option enabled.
     pub seccomp: SeccompMode,
+    /// Provides a means for a process to specify a filter for incoming system calls. 
+    /// (since Linux 4.14, see seccomp(2))
+    pub seccomp_filters: u64,
     /// CPUs on which this process may run (since Linux 2.6.24, see cpuset(7)).
     ///
     /// The slice represents a bitmask in the same format as `BitVec`.
@@ -254,10 +257,11 @@ named!(parse_cap_effective<u64>, delimited!(tag!("CapEff:\t"), parse_u64_hex, li
 named!(parse_cap_bounding<u64>,  delimited!(tag!("CapBnd:\t"), parse_u64_hex, line_ending));
 named!(parse_cap_ambient<u64>,  delimited!(tag!("CapAmb:\t"), parse_u64_hex, line_ending));
 
-named!(parse_no_new_privs<bool>,       delimited!(tag!("NoNewPrivs:\t"),   parse_bit,           line_ending));
-named!(parse_seccomp<SeccompMode>,     delimited!(tag!("Seccomp:\t"),      parse_seccomp_mode,  line_ending));
-named!(parse_cpus_allowed<Box<[u8]> >, delimited!(tag!("Cpus_allowed:\t"), parse_u32_mask_list, line_ending));
-named!(parse_mems_allowed<Box<[u8]> >, delimited!(tag!("Mems_allowed:\t"), parse_u32_mask_list, line_ending));
+named!(parse_no_new_privs<bool>,       delimited!(tag!("NoNewPrivs:\t"),        parse_bit,             line_ending));
+named!(parse_seccomp<SeccompMode>,     delimited!(tag!("Seccomp:\t"),           parse_seccomp_mode,    line_ending));
+named!(parse_seccomp_filters<u64>,     delimited!(tag!("Seccomp_filters:\t"),   parse_u64_hex,         line_ending));
+named!(parse_cpus_allowed<Box<[u8]> >, delimited!(tag!("Cpus_allowed:\t"),      parse_u32_mask_list,   line_ending));
+named!(parse_mems_allowed<Box<[u8]> >, delimited!(tag!("Mems_allowed:\t"),      parse_u32_mask_list,   line_ending));
 
 named!(parse_cpus_allowed_list<()>, chain!(tag!("Cpus_allowed_list:\t") ~ not_line_ending ~ line_ending, || { () }));
 named!(parse_mems_allowed_list<()>, chain!(tag!("Mems_allowed_list:\t") ~ not_line_ending ~ line_ending, || { () }));
@@ -328,11 +332,12 @@ fn parse_status(i: &[u8]) -> IResult<&[u8], Status> {
                | parse_cap_bounding  => { |value| status.cap_bounding  = value }
                | parse_cap_ambient   => { |value| status.cap_ambient   = value }
 
-               | parse_no_new_privs  => { |value| status.no_new_privs  = value }
-               | parse_seccomp       => { |value| status.seccomp       = value }
-               | parse_cpus_allowed  => { |value| status.cpus_allowed  = value }
+               | parse_no_new_privs     => { |value| status.no_new_privs    = value }
+               | parse_seccomp          => { |value| status.seccomp         = value }
+               | parse_seccomp_filters  => { |value| status.seccomp_filters = value }
+               | parse_cpus_allowed     => { |value| status.cpus_allowed    = value }
                | parse_cpus_allowed_list
-               | parse_mems_allowed  => { |value| status.mems_allowed  = value }
+               | parse_mems_allowed     => { |value| status.mems_allowed    = value }
                | parse_mems_allowed_list
                | parse_voluntary_ctxt_switches    => { |value| status.voluntary_ctxt_switches    = value }
                | parse_nonvoluntary_ctxt_switches => { |value| status.nonvoluntary_ctxt_switches = value }
@@ -427,6 +432,7 @@ mod tests {
                             CapAmb:\t0000000000000000\n\
                             NoNewPrivs:\t0\n\
                             Seccomp:\t0\n\
+                            Seccomp_filters:\t0\n\
                             Speculation_Store_Bypass:\tthread vulnerable\n\
                             Cpus_allowed:\tffff\n\
                             Cpus_allowed_list:\t0-15\n\
@@ -492,6 +498,7 @@ mod tests {
         assert_eq!(0x0000000000000000, status.cap_ambient);
         assert_eq!(false, status.no_new_privs);
         assert_eq!(SeccompMode::Disabled, status.seccomp);
+        assert_eq!(0, status.seccomp_filters);
         assert_eq!("thread vulnerable".as_bytes(), status.speculation_store_bypass.as_bytes());
         assert_eq!(&[0xff, 0xff, 0x00, 0x00], &*status.cpus_allowed);
         let mems_allowed: &mut [u8] = &mut [0; 64];
